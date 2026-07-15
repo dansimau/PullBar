@@ -14,24 +14,28 @@ public class GitHubClient {
     
     @FromKeychain(.githubToken) var githubToken
     
-    func getAssignedPulls(completion:@escaping (([Edge]) -> Void)) -> Void {
-        
+    /// Fetches open pull requests matching a category's search `filter`, wrapped in
+    /// the standard `is:open is:pr ... archived:false` query along with any
+    /// user-configured additional query.
+    func getPulls(filter: String, completion:@escaping (([Edge]) -> Void)) -> Void {
+
         if (Defaults[.githubUsername] == "" || githubToken == "") {
             completion([Edge]())
+            return
         }
-        
+
         let headers: HTTPHeaders = [
             .authorization(bearerToken: githubToken),
             .accept("application/json")
         ]
-        
-        let graphQlQuery = buildGraphQlQuery(queryString: "is:open is:pr assignee:\(Defaults[.githubUsername]) archived:false \(Defaults[.githubAdditionalQuery])")
-        
+
+        let graphQlQuery = buildGraphQlQuery(queryString: "is:open is:pr \(filter) archived:false \(Defaults[.githubAdditionalQuery])")
+
         let parameters = [
             "query": graphQlQuery,
             "variables":[]
         ] as [String: Any]
-        
+
         AF.request(Defaults[.githubApiBaseUrl] + "/graphql", method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: headers)
             .validate(statusCode: 200..<300)
             .responseDecodable(of: GraphQlSearchResp.self, decoder: GithubDecoder()) { response in
@@ -42,66 +46,6 @@ public class GitHubClient {
                     sendNotification(body: error.localizedDescription)
                     completion([Edge]())
                     print(error)
-                }
-            }
-    }
-    
-    func getCreatedPulls(completion:@escaping (([Edge]) -> Void)) -> Void {
-        
-        if (Defaults[.githubUsername] == "" || githubToken == "") {
-            completion([Edge]())
-        }
-        
-        let headers: HTTPHeaders = [
-            .authorization(bearerToken: githubToken),
-            .accept("application/json")
-        ]
-        let graphQlQuery = buildGraphQlQuery(queryString: "is:open is:pr author:\(Defaults[.githubUsername]) archived:false \(Defaults[.githubAdditionalQuery])")
-        
-        let parameters = [
-            "query": graphQlQuery,
-            "variables":[]
-        ] as [String: Any]
-        
-        AF.request(Defaults[.githubApiBaseUrl] + "/graphql", method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: headers)
-            .validate(statusCode: 200..<300)
-            .responseDecodable(of: GraphQlSearchResp.self, decoder: GithubDecoder()) { response in
-                switch response.result {
-                case .success(let prs):
-                    completion(prs.data.search.edges)
-                case .failure(let error):
-                    sendNotification(body: error.localizedDescription)
-                    print(error)
-                    completion([Edge]())
-                }
-            }
-    }
-    
-    func getReviewRequestedPulls(completion:@escaping (([Edge]) -> Void)) -> Void {
-        if (Defaults[.githubUsername] == "" || githubToken == "") {
-            completion([Edge]())
-        }
-        
-        let headers: HTTPHeaders = [
-            .authorization(bearerToken: githubToken),
-            .accept("application/json")
-        ]
-        let graphQlQuery = buildGraphQlQuery(queryString: "is:open is:pr review-requested:\(Defaults[.githubUsername]) archived:false \(Defaults[.githubAdditionalQuery])")
-        
-        let parameters = [
-            "query": graphQlQuery,
-            "variables":[]
-        ] as [String: Any]
-        
-        AF.request(Defaults[.githubApiBaseUrl] + "/graphql", method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: headers)
-            .validate(statusCode: 200..<300)
-            .responseDecodable(of: GraphQlSearchResp.self, decoder: GithubDecoder()) { response in
-                switch response.result {
-                case .success(let prs):
-                    completion(prs.data.search.edges)
-                case .failure(let error):
-                    sendNotification(body: error.localizedDescription)
-                    completion([Edge]())
                 }
             }
     }

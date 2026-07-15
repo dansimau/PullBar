@@ -26,8 +26,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var timer: Timer? = nil
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        migrateCategoriesIfNeeded()
+
         NotificationCenter.default.addObserver(self, selector: #selector(AppDelegate.windowClosed), name: NSWindow.willCloseNotification, object: nil)
-        
+
         guard let statusButton = statusBarItem.button else { return }
         let icon = NSImage(named: "git-pull-request")
         let size = NSSize(width: 16, height: 16)
@@ -65,7 +67,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func openLink(_ sender: NSMenuItem) {
         NSWorkspace.shared.open(sender.representedObject as! URL)
     }
-    
+
+    /// One-time migration of the legacy per-type toggles into the unified
+    /// `categories` list, then reconcile the stored list with the current builtins
+    /// (so builtins added in newer versions show up and their name/filter stay
+    /// authoritative while the user's enabled choice is preserved).
+    func migrateCategoriesIfNeeded() {
+        if !Defaults[.didMigrateCategories] {
+            var categories = Defaults[.categories]
+            let legacyEnabled: [String: Bool] = [
+                SearchCategory.assignedId: Defaults[.showAssigned],
+                SearchCategory.createdId: Defaults[.showCreated],
+                SearchCategory.reviewRequestedId: Defaults[.showRequested],
+            ]
+            for index in categories.indices {
+                if let enabled = legacyEnabled[categories[index].id] {
+                    categories[index].enabled = enabled
+                }
+            }
+            Defaults[.categories] = categories
+            Defaults[.didMigrateCategories] = true
+        }
+
+        Defaults[.categories] = SearchCategory.reconcile(Defaults[.categories])
+    }
+
 }
 
 extension AppDelegate {
@@ -80,81 +106,38 @@ extension AppDelegate {
         }
 
 
-        var assignedPulls: [Edge]? = []
-        var createdPulls: [Edge]? = []
-        var reviewRequestedPulls: [Edge]? = []
-
+        let categories = Defaults[.categories].filter { $0.enabled && !$0.filter.trimmingCharacters(in: .whitespaces).isEmpty }
+        var pullsByCategory: [String: [Edge]] = [:]
 
         let group = DispatchGroup()
-        
-        if Defaults[.showAssigned] {
-            group.enter()
-            ghClient.getAssignedPulls() { pulls in
-                assignedPulls?.append(contentsOf: pulls)
-                group.leave()
-            }
-        }
 
-        if Defaults[.showCreated] {
+        for category in categories {
             group.enter()
-            ghClient.getCreatedPulls() { pulls in
-                createdPulls?.append(contentsOf: pulls)
-                group.leave()
-            }
-        }
-
-        if Defaults[.showRequested] {
-            group.enter()
-            ghClient.getReviewRequestedPulls() { pulls in
-                reviewRequestedPulls?.append(contentsOf: pulls)
+            ghClient.getPulls(filter: category.resolvedFilter(username: Defaults[.githubUsername])) { pulls in
+                pullsByCategory[category.id, default: []].append(contentsOf: pulls)
                 group.leave()
             }
         }
 
         group.notify(queue: .main) {
-            
-            if let assignedPulls = assignedPulls, let createdPulls = createdPulls, let reviewRequestedPulls = reviewRequestedPulls {
-                self.statusBarItem.button?.title = ""
+            self.statusBarItem.button?.title = ""
 
-                if Defaults[.showAssigned] && !assignedPulls.isEmpty {
-                    if Defaults[.counterType] == .assigned {
-                        self.statusBarItem.button?.title = String(assignedPulls.count)
-                    }
+            for category in categories {
+                let pulls = pullsByCategory[category.id] ?? []
+                if pulls.isEmpty { continue }
 
-                    self.menu.addItem(NSMenuItem(title: "Assigned (\(assignedPulls.count))", action: nil, keyEquivalent: ""))
-                    for pull in assignedPulls {
-                        self.menu.addItem(self.createMenuItem(pull: pull))
-                    }
-                    self.menu.addItem(.separator())
-                }
-                
-                if Defaults[.showCreated] && !createdPulls.isEmpty {
-                    if Defaults[.counterType] == .created {
-                        self.statusBarItem.button?.title = String(createdPulls.count)
-                    }
-
-                    self.menu.addItem(NSMenuItem(title: "Created (\(createdPulls.count))", action: nil, keyEquivalent: ""))
-                    for pull in createdPulls {
-                        self.menu.addItem(self.createMenuItem(pull: pull))
-                    }
-                    self.menu.addItem(.separator())
+                if Defaults[.counterCategoryId] == category.id {
+                    self.statusBarItem.button?.title = String(pulls.count)
                 }
 
-                if Defaults[.showRequested] && !reviewRequestedPulls.isEmpty {
-                    if Defaults[.counterType] == .reviewRequested {
-                        self.statusBarItem.button?.title = String(reviewRequestedPulls.count)
-                    }
-
-                    self.menu.addItem(NSMenuItem(title: "Review Requested (\(reviewRequestedPulls.count))", action: nil, keyEquivalent: ""))
-                    for pull in reviewRequestedPulls {
-                        self.menu.addItem(self.createMenuItem(pull: pull))
-                    }
-                    self.menu.addItem(.separator())
+                self.menu.addItem(NSMenuItem(title: "\(category.name) (\(pulls.count))", action: nil, keyEquivalent: ""))
+                for pull in pulls {
+                    self.menu.addItem(self.createMenuItem(pull: pull))
                 }
-                
-                
-                self.addMenuFooterItems()
+                self.menu.addItem(.separator())
             }
+
+            self.addMenuFooterItems()
         }
     }
     
