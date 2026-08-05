@@ -72,9 +72,9 @@ extension AppDelegate {
     @objc
     func refreshMenu() {
         NSLog("Refreshing menu")
-        self.menu.removeAllItems()
 
         if (Defaults[.githubUsername] == "" || githubToken == "") {
+            self.menu.removeAllItems()
             addMenuFooterItems()
             return
         }
@@ -120,6 +120,10 @@ extension AppDelegate {
         group.notify(queue: .main) {
             
             if let assignedPulls = assignedPulls, let createdPulls = createdPulls, let reviewRequestedPulls = reviewRequestedPulls {
+                // An empty NSMenu will not open, so hold the previous items until
+                // the new ones are ready to replace them.
+                self.menu.removeAllItems()
+
                 switch counterType {
                 case .assigned:        self.statusBarItem.button?.title = assignedPulls.isEmpty ? "" : String(assignedPulls.count)
                 case .created:         self.statusBarItem.button?.title = createdPulls.isEmpty ? "" : String(createdPulls.count)
