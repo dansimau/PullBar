@@ -50,8 +50,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timer?.fire()
         RunLoop.main.add(timer!, forMode: .common)
         NSApp.setActivationPolicy(.accessory)
-        
-        
+
+
         // Insert code here to initialize your application
     }
     
@@ -68,28 +68,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(sender.representedObject as! URL)
     }
 
-    /// One-time migration of the legacy per-type toggles into the unified
-    /// `categories` list, then reconcile the stored list with the current builtins
-    /// (so builtins added in newer versions show up and their name/filter stay
-    /// authoritative while the user's enabled choice is preserved).
+    /// One-time migration of the legacy per-type toggles and counter choice into
+    /// the user-managed `categories` list and `counterSelection`. Fresh installs
+    /// (no persisted legacy settings) keep the default categories instead.
     func migrateCategoriesIfNeeded() {
-        if !Defaults[.didMigrateCategories] {
-            var categories = Defaults[.categories]
-            let legacyEnabled: [String: Bool] = [
-                SearchCategory.assignedId: Defaults[.showAssigned],
-                SearchCategory.createdId: Defaults[.showCreated],
-                SearchCategory.reviewRequestedId: Defaults[.showRequested],
-            ]
-            for index in categories.indices {
-                if let enabled = legacyEnabled[categories[index].id] {
-                    categories[index].enabled = enabled
-                }
-            }
-            Defaults[.categories] = categories
-            Defaults[.didMigrateCategories] = true
-        }
+        guard Defaults[.categoriesSchemaVersion] < 1 else { return }
+        Defaults[.categoriesSchemaVersion] = 1
 
-        Defaults[.categories] = SearchCategory.reconcile(Defaults[.categories])
+        let userDefaults = UserDefaults.standard
+        let hasLegacySettings = ["showAssigned", "showCreated", "showRequested", "counterType"]
+            .contains { userDefaults.object(forKey: $0) != nil }
+        guard hasLegacySettings else { return }
+
+        // Seed the categories list from the legacy toggles, preserving order.
+        var seeded: [SearchCategory] = []
+        if Defaults[.showAssigned] { seeded.append(BuiltinTemplate.assigned.makeCategory(id: "seed-assigned")) }
+        if Defaults[.showCreated] { seeded.append(BuiltinTemplate.created.makeCategory(id: "seed-created")) }
+        if Defaults[.showRequested] { seeded.append(BuiltinTemplate.reviewRequested.makeCategory(id: "seed-review-requested")) }
+        Defaults[.categories] = seeded
+
+        // Map the legacy counter choice onto the new counter selection.
+        switch Defaults[.legacyCounterType] {
+        case "none":
+            Defaults[.counterSelection] = SearchCategory.counterNone
+        case "assigned":
+            Defaults[.counterSelection] = seeded.first(where: { $0.id == "seed-assigned" })?.id ?? SearchCategory.counterMyTeam
+        case "created":
+            Defaults[.counterSelection] = seeded.first(where: { $0.id == "seed-created" })?.id ?? SearchCategory.counterMyTeam
+        default: // "reviewRequested"
+            Defaults[.counterSelection] = SearchCategory.counterMyTeam
+        }
     }
 
 }
@@ -106,15 +114,31 @@ extension AppDelegate {
         }
 
 
-        let categories = Defaults[.categories].filter { $0.enabled && !$0.filter.trimmingCharacters(in: .whitespaces).isEmpty }
+        let username = Defaults[.githubUsername]
+        let categories = Defaults[.categories].filter {
+            !$0.resolvedFilter(username: username).trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        let counter = Defaults[.counterSelection]
+
         var pullsByCategory: [String: [Edge]] = [:]
+        var myTeamCount: Int? = nil
 
         let group = DispatchGroup()
 
         for category in categories {
             group.enter()
-            ghClient.getPulls(filter: category.resolvedFilter(username: Defaults[.githubUsername])) { pulls in
+            ghClient.getPulls(filter: category.resolvedFilter(username: username)) { pulls in
                 pullsByCategory[category.id, default: []].append(contentsOf: pulls)
+                group.leave()
+            }
+        }
+
+        // "My team" is a counter-only builtin, fetched independently of the list.
+        if counter == SearchCategory.counterMyTeam {
+            group.enter()
+            let filter = SearchCategory.myTeamFilter.replacingOccurrences(of: SearchCategory.usernamePlaceholder, with: username)
+            ghClient.getPulls(filter: filter) { pulls in
+                myTeamCount = pulls.count
                 group.leave()
             }
         }
@@ -126,15 +150,23 @@ extension AppDelegate {
                 let pulls = pullsByCategory[category.id] ?? []
                 if pulls.isEmpty { continue }
 
-                if Defaults[.counterCategoryId] == category.id {
-                    self.statusBarItem.button?.title = String(pulls.count)
-                }
-
                 self.menu.addItem(NSMenuItem(title: "\(category.name) (\(pulls.count))", action: nil, keyEquivalent: ""))
                 for pull in pulls {
                     self.menu.addItem(self.createMenuItem(pull: pull))
                 }
                 self.menu.addItem(.separator())
+            }
+
+            let counterCount: Int
+            if counter == SearchCategory.counterMyTeam {
+                counterCount = myTeamCount ?? 0
+            } else if counter != SearchCategory.counterNone {
+                counterCount = (pullsByCategory[counter] ?? []).count
+            } else {
+                counterCount = 0
+            }
+            if counterCount > 0 {
+                self.statusBarItem.button?.title = String(counterCount)
             }
 
             self.addMenuFooterItems()

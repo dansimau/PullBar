@@ -24,79 +24,17 @@ struct PreferencesView: View {
 
     @Default(.refreshRate) var refreshRate
     @Default(.buildType) var builtType
-    @Default(.counterCategoryId) var counterCategoryId
+    @Default(.counterSelection) var counterSelection
 
     @State private var showGhAlert = false
-    @State private var newCategoryName = ""
-    @State private var newCategoryFilter = ""
 
     @StateObject private var githubTokenValidator = GithubTokenValidator()
 //    @ObservedObject private var launchAtLogin = LaunchAtLogin.observable
-    
-    @State private var isExpanded: Bool = false
 
     var body: some View {
 
         TabView {
             Form {
-                HStack(alignment: .top) {
-                    Text("Pull Requests:").frame(width: 120, alignment: .trailing)
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach($categories) { $category in
-                            HStack(alignment: .center, spacing: 6) {
-                                Toggle("", isOn: $category.enabled)
-                                    .labelsHidden()
-                                if category.isBuiltin {
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        Text(category.name)
-                                        Text(category.filter)
-                                            .font(.footnote)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "lock")
-                                        .foregroundColor(.secondary)
-                                        .help("Built-in category, cannot be deleted")
-                                } else {
-                                    TextField("name", text: $category.name)
-                                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                                        .frame(width: 120)
-                                    TextField("filter", text: $category.filter)
-                                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                                        .frame(width: 160)
-                                    Button {
-                                        categories.removeAll { $0.id == category.id }
-                                    } label: {
-                                        Image(systemName: "trash")
-                                    }
-                                    .help("Delete category")
-                                }
-                            }
-                        }
-
-                        Divider().frame(width: 320)
-
-                        HStack(alignment: .center, spacing: 6) {
-                            TextField("name", text: $newCategoryName)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .frame(width: 120)
-                            TextField("filter, e.g. author:@me", text: $newCategoryFilter)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .frame(width: 160)
-                            Button("Add") {
-                                let name = newCategoryName.trimmingCharacters(in: .whitespaces)
-                                let filter = newCategoryFilter.trimmingCharacters(in: .whitespaces)
-                                guard !name.isEmpty, !filter.isEmpty else { return }
-                                categories.append(SearchCategory(id: UUID().uuidString, name: name, filter: filter, enabled: true, isBuiltin: false))
-                                newCategoryName = ""
-                                newCategoryFilter = ""
-                            }
-                            .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty
-                                      || newCategoryFilter.trimmingCharacters(in: .whitespaces).isEmpty)
-                        }
-                    }
-                }
-
                 HStack(alignment: .center) {
                     Text("Build Information:").frame(width: 120, alignment: .trailing)
                     Picker("", selection: $builtType, content: {
@@ -143,6 +81,9 @@ struct PreferencesView: View {
             .padding(8)
             .frame(maxWidth: .infinity)
             .tabItem{Text("General")}
+
+            categoriesTab
+                .tabItem{Text("Categories")}
 
             Form {
                 HStack(alignment: .center) {
@@ -206,14 +147,20 @@ struct PreferencesView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
-                    Picker("", selection: $counterCategoryId, content: {
-                        Text("none").tag("")
-                        ForEach(categories) { category in
-                            Text(category.name).tag(category.id)
+                    Picker("", selection: $counterSelection, content: {
+                        Section {
+                            Text("None").tag(SearchCategory.counterNone)
+                            Text("My team").tag(SearchCategory.counterMyTeam)
+                        }
+                        Section {
+                            ForEach(categories) { category in
+                                Text(category.name.isEmpty ? "(unnamed)" : category.name).tag(category.id)
+                            }
                         }
                     })
                     .labelsHidden()
-                    .pickerStyle(RadioGroupPickerStyle())
+                    .pickerStyle(MenuPickerStyle())
+                    .frame(width: 200)
                 }
             }
             .padding(8)
@@ -228,7 +175,7 @@ struct PreferencesView: View {
                         .disableAutocorrection(true)
                         .textContentType(.password)
                         .frame(width: 380)
-                  
+
                 }
                 Text("See the GitHub [search documentation](https://docs.github.com/en/search-github/getting-started-with-searching-on-github/understanding-the-search-syntax) for more information on advanced queries")
                     .font(.footnote)
@@ -239,9 +186,75 @@ struct PreferencesView: View {
                 .tabItem{Text("Advanced")}
 
         }
-        .frame(width: 600)
+        .frame(width: 780)
         .padding()
 
+    }
+
+    /// Categories management tab: a scrollable, reorderable list of categories
+    /// with per-row name/filter editing and deletion, plus a "+" menu to add
+    /// builtin templates or a blank custom category.
+    private var categoriesTab: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Categories appear in the menu in this order. Drag to reorder.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            List {
+                ForEach($categories) { $category in
+                    HStack(spacing: 8) {
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundColor(.secondary)
+                            .help("Drag to reorder")
+                        TextField("name", text: $category.name)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .frame(width: 150)
+                        TextField("filter, e.g. review-requested:@me", text: $category.filter)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .frame(maxWidth: .infinity)
+                        Button {
+                            categories.removeAll { $0.id == category.id }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(BorderlessButtonStyle())
+                        .help("Delete category")
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onMove { indices, newOffset in
+                    categories.move(fromOffsets: indices, toOffset: newOffset)
+                }
+                .onDelete { offsets in
+                    categories.remove(atOffsets: offsets)
+                }
+            }
+            .frame(height: 260)
+
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(BuiltinTemplate.allCases) { template in
+                        Button(template.name) {
+                            categories.append(template.makeCategory(id: UUID().uuidString))
+                        }
+                    }
+                    Divider()
+                    Button("Custom") {
+                        categories.append(SearchCategory(id: UUID().uuidString, name: "", filter: ""))
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .frame(width: 60)
+
+                Text("Use \(SearchCategory.usernamePlaceholder) in a filter to insert your username.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
     }
 }
 

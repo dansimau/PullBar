@@ -13,54 +13,45 @@ extension Defaults.Keys {
     static let githubUsername = Key<String>("githubUsername", default: "")
     static let githubAdditionalQuery = Key<String>("githubAdditionalQuery", default:"")
 
-    // Legacy keys, kept so existing preferences can be migrated into `categories`.
+    // Legacy keys, kept only so preferences from older versions can be migrated
+    // into `categories` / `counterSelection`.
     static let showAssigned = Key<Bool>("showAssigned", default: false)
     static let showCreated = Key<Bool>("showCreated", default: false)
     static let showRequested = Key<Bool>("showRequested", default: true)
+    static let legacyCounterType = Key<String>("counterType", default: "reviewRequested")
 
-    static let categories = Key<[SearchCategory]>("categories", default: SearchCategory.builtins)
-    static let didMigrateCategories = Key<Bool>("didMigrateCategories", default: false)
+    // Ordered list of categories the user has added. Order determines the order
+    // sections appear in the menubar menu.
+    static let categories = Key<[SearchCategory]>("categories", default: SearchCategory.defaultCategories)
+    // Bumped when the categories storage format changes so migrations run once.
+    static let categoriesSchemaVersion = Key<Int>("categoriesSchemaVersion", default: 0)
 
     static let showAvatar = Key<Bool>("showAvatar", default: false)
     static let showLabels = Key<Bool>("showLabels", default: true)
 
     static let refreshRate = Key<Int>("refreshRate", default: 5)
     static let buildType = Key<BuildType>("buildType", default: .none)
-    // Id of the category whose count is shown next to the menubar icon ("" == none).
-    static let counterCategoryId = Key<String>("counterCategoryId", default: SearchCategory.reviewRequestedId)
+    // Which count is shown next to the menubar icon. Either a special token
+    // (`counterNone` / `counterMyTeam`) or the id of a category.
+    static let counterSelection = Key<String>("counterSelection", default: SearchCategory.counterMyTeam)
 }
 
 extension KeychainKeys {
     static let githubToken: KeychainAccessKey = KeychainAccessKey(key: "githubToken")
 }
 
-/// A named GitHub search that becomes a section in the menu. Builtin categories
-/// ship with the app and cannot be deleted; custom ones are added by the user.
+/// A named GitHub search that becomes a section in the menu. Categories are added
+/// by the user (optionally seeded from a builtin template) and are freely
+/// editable, reorderable, and deletable.
 struct SearchCategory: Codable, Defaults.Serializable, Identifiable, Hashable {
     var id: String
     var name: String
     var filter: String
-    var enabled: Bool
-    var isBuiltin: Bool
-
-    static let assignedId = "assigned"
-    static let createdId = "created"
-    static let reviewRequestedId = "review-requested"
-    static let userReviewRequestedId = "user-review-requested"
 
     /// Placeholder in a filter that is replaced with the configured username at
-    /// query time. Not GitHub search syntax — used so builtin filters can be
+    /// query time. Not GitHub search syntax — used so a template filter can be
     /// stored statically while still resolving to the current user.
     static let usernamePlaceholder = "<username>"
-
-    /// The builtin categories, in display order. `filter` is the fragment that is
-    /// inserted into the standard `is:open is:pr ... archived:false` wrapper.
-    static let builtins: [SearchCategory] = [
-        SearchCategory(id: assignedId, name: "Assigned", filter: "assignee:\(usernamePlaceholder)", enabled: false, isBuiltin: true),
-        SearchCategory(id: createdId, name: "Created", filter: "author:\(usernamePlaceholder)", enabled: false, isBuiltin: true),
-        SearchCategory(id: reviewRequestedId, name: "Review Requested", filter: "review-requested:\(usernamePlaceholder)", enabled: true, isBuiltin: true),
-        SearchCategory(id: userReviewRequestedId, name: "Review Requested (direct)", filter: "user-review-requested:\(usernamePlaceholder)", enabled: false, isBuiltin: true),
-    ]
 
     /// The search filter to actually query with. The `<username>` placeholder is
     /// replaced with the configured username; everything else is passed through
@@ -70,21 +61,55 @@ struct SearchCategory: Codable, Defaults.Serializable, Identifiable, Hashable {
         filter.replacingOccurrences(of: SearchCategory.usernamePlaceholder, with: username)
     }
 
-    /// Reconciles a stored list against the current set of builtins: keeps each
-    /// builtin's name/filter authoritative while preserving the user's enabled
-    /// choice, inserts any builtin that is missing (e.g. added in a new version),
-    /// and keeps custom categories untouched. Builtins are ordered first.
-    static func reconcile(_ stored: [SearchCategory]) -> [SearchCategory] {
-        let reconciledBuiltins = builtins.map { builtin -> SearchCategory in
-            guard let existing = stored.first(where: { $0.id == builtin.id }) else { return builtin }
-            var updated = builtin
-            updated.enabled = existing.enabled
-            return updated
+    // MARK: - Counter selection tokens
+
+    /// No count shown next to the menubar icon.
+    static let counterNone = ""
+    /// Count of team review requests, independent of the categories list.
+    static let counterMyTeam = "__my_team__"
+    /// Filter backing the "My team" counter option.
+    static let myTeamFilter = "review-requested:\(usernamePlaceholder)"
+
+    // MARK: - Defaults
+
+    /// The list a fresh install starts with: the original three builtin types.
+    static let defaultCategories: [SearchCategory] = [
+        BuiltinTemplate.assigned.makeCategory(id: "seed-assigned"),
+        BuiltinTemplate.created.makeCategory(id: "seed-created"),
+        BuiltinTemplate.reviewRequested.makeCategory(id: "seed-review-requested"),
+    ]
+}
+
+/// Predefined starting points offered by the "+" menu on the Categories tab.
+/// Once added they become ordinary categories the user can rename or re-query.
+enum BuiltinTemplate: String, CaseIterable, Identifiable {
+    case assigned
+    case created
+    case reviewRequested
+    case userReviewRequested
+
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .assigned: return "Assigned"
+        case .created: return "Created"
+        case .reviewRequested: return "Review Requested"
+        case .userReviewRequested: return "Review Requested (Direct)"
         }
-        let customCategories = stored.filter { category in
-            !builtins.contains(where: { $0.id == category.id })
+    }
+
+    var filter: String {
+        switch self {
+        case .assigned: return "assignee:\(SearchCategory.usernamePlaceholder)"
+        case .created: return "author:\(SearchCategory.usernamePlaceholder)"
+        case .reviewRequested: return "review-requested:\(SearchCategory.usernamePlaceholder)"
+        case .userReviewRequested: return "user-review-requested:\(SearchCategory.usernamePlaceholder)"
         }
-        return reconciledBuiltins + customCategories
+    }
+
+    func makeCategory(id: String) -> SearchCategory {
+        SearchCategory(id: id, name: name, filter: filter)
     }
 }
 
@@ -92,7 +117,7 @@ enum BuildType: String, Defaults.Serializable, CaseIterable, Identifiable {
     case checks
     case commitStatus
     case none
-    
+
     var id: Self { self }
 
     var description: String {
@@ -107,4 +132,3 @@ enum BuildType: String, Defaults.Serializable, CaseIterable, Identifiable {
         }
     }
 }
-
