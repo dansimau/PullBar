@@ -144,6 +144,12 @@ extension AppDelegate {
         }
 
         group.notify(queue: .main) {
+            // Clear again right before rebuilding: the initial removeAllItems()
+            // runs synchronously at the start of refreshMenu(), but building
+            // happens here asynchronously. If two refreshes overlap, clearing
+            // here ensures the last completion produces a single menu rather
+            // than appending a duplicate set of items.
+            self.menu.removeAllItems()
             self.statusBarItem.button?.title = ""
 
             // Only categories that actually have pull requests are rendered.
