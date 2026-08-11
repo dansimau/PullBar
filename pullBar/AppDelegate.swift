@@ -146,15 +146,35 @@ extension AppDelegate {
         group.notify(queue: .main) {
             self.statusBarItem.button?.title = ""
 
-            for category in categories {
-                let pulls = pullsByCategory[category.id] ?? []
-                if pulls.isEmpty { continue }
+            // Only categories that actually have pull requests are rendered.
+            let visibleCategories = categories.filter { !(pullsByCategory[$0.id] ?? []).isEmpty }
 
-                self.menu.addItem(NSMenuItem(title: "\(category.name) (\(pulls.count))", action: nil, keyEquivalent: ""))
-                for pull in pulls {
-                    self.menu.addItem(self.createMenuItem(pull: pull))
+            for (index, category) in visibleCategories.enumerated() {
+                let pulls = pullsByCategory[category.id] ?? []
+                let headerTitle = "\(category.name) (\(pulls.count))"
+
+                if category.asSubmenu {
+                    let parent = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
+                    let submenu = NSMenu()
+                    for pull in pulls {
+                        submenu.addItem(self.createMenuItem(pull: pull))
+                    }
+                    parent.submenu = submenu
+                    self.menu.addItem(parent)
+                } else {
+                    self.menu.addItem(NSMenuItem(title: headerTitle, action: nil, keyEquivalent: ""))
+                    for pull in pulls {
+                        self.menu.addItem(self.createMenuItem(pull: pull))
+                    }
                 }
-                self.menu.addItem(.separator())
+
+                // Keep adjacent submenu categories grouped: no separator between
+                // two consecutive submenu items.
+                let next = index + 1 < visibleCategories.count ? visibleCategories[index + 1] : nil
+                let groupedWithNext = category.asSubmenu && (next?.asSubmenu ?? false)
+                if !groupedWithNext {
+                    self.menu.addItem(.separator())
+                }
             }
 
             let counterCount: Int

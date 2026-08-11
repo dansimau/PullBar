@@ -201,9 +201,20 @@ struct PreferencesView: View {
                 .foregroundColor(.secondary)
 
             List {
+                HStack(spacing: 8) {
+                    Color.clear.frame(width: 16, height: 1)
+                    Text("Category name").frame(width: 150, alignment: .leading)
+                    Text("Search query").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Show in").frame(width: 120, alignment: .leading)
+                    Color.clear.frame(width: 24, height: 1)
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+
                 ForEach($categories) { $category in
                     HStack(spacing: 8) {
                         Image(systemName: "line.3.horizontal")
+                            .frame(width: 16)
                             .foregroundColor(.secondary)
                             .help("Drag to reorder")
                         TextField("name", text: $category.name)
@@ -212,12 +223,21 @@ struct PreferencesView: View {
                         TextField("filter, e.g. review-requested:@me", text: $category.filter)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
                             .frame(maxWidth: .infinity)
+                        Picker("", selection: $category.asSubmenu) {
+                            Text("Main menu").tag(false)
+                            Text("Submenu").tag(true)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(MenuPickerStyle())
+                        .frame(width: 120)
+                        .help("Where this category's pull requests appear in the menu")
                         Button {
                             categories.removeAll { $0.id == category.id }
                         } label: {
                             Image(systemName: "trash")
                         }
                         .buttonStyle(BorderlessButtonStyle())
+                        .frame(width: 24)
                         .help("Delete category")
                     }
                     .padding(.vertical, 2)

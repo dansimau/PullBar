@@ -47,6 +47,28 @@ struct SearchCategory: Codable, Defaults.Serializable, Identifiable, Hashable {
     var id: String
     var name: String
     var filter: String
+    /// When true the category renders as a single collapsible menu item
+    /// ("Name (12) ▸") whose submenu holds the pull requests, instead of listing
+    /// them inline.
+    var asSubmenu: Bool
+
+    init(id: String, name: String, filter: String, asSubmenu: Bool = false) {
+        self.id = id
+        self.name = name
+        self.filter = filter
+        self.asSubmenu = asSubmenu
+    }
+
+    // Custom decoding so categories stored before `asSubmenu` existed still
+    // decode (missing key defaults to false) rather than failing and wiping the
+    // user's saved list.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        filter = try container.decode(String.self, forKey: .filter)
+        asSubmenu = try container.decodeIfPresent(Bool.self, forKey: .asSubmenu) ?? false
+    }
 
     /// Placeholder in a filter that is replaced with the configured username at
     /// query time. Not GitHub search syntax — used so a template filter can be
