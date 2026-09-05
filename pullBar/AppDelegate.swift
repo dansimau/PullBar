@@ -106,9 +106,9 @@ extension AppDelegate {
     @objc
     func refreshMenu() {
         NSLog("Refreshing menu")
-        self.menu.removeAllItems()
 
         if (Defaults[.githubUsername] == "" || githubToken == "") {
+            self.menu.removeAllItems()
             addMenuFooterItems()
             return
         }

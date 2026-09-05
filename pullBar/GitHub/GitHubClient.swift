@@ -49,7 +49,7 @@ public class GitHubClient {
                 }
             }
     }
-    
+
     private func buildGraphQlQuery(queryString: String) -> String {
         
         var build = ""
