@@ -86,8 +86,14 @@ extension AppDelegate {
 
 
         let group = DispatchGroup()
-        
-        if Defaults[.showAssigned] {
+
+        // The counter can point at a section that isn't displayed.
+        let counterType = Defaults[.counterType]
+        let needAssigned  = Defaults[.showAssigned]  || counterType == .assigned
+        let needCreated   = Defaults[.showCreated]   || counterType == .created
+        let needRequested = Defaults[.showRequested] || counterType == .reviewRequested
+
+        if needAssigned {
             group.enter()
             ghClient.getAssignedPulls() { pulls in
                 assignedPulls?.append(contentsOf: pulls)
@@ -95,7 +101,7 @@ extension AppDelegate {
             }
         }
 
-        if Defaults[.showCreated] {
+        if needCreated {
             group.enter()
             ghClient.getCreatedPulls() { pulls in
                 createdPulls?.append(contentsOf: pulls)
@@ -103,7 +109,7 @@ extension AppDelegate {
             }
         }
 
-        if Defaults[.showRequested] {
+        if needRequested {
             group.enter()
             ghClient.getReviewRequestedPulls() { pulls in
                 reviewRequestedPulls?.append(contentsOf: pulls)
@@ -114,13 +120,14 @@ extension AppDelegate {
         group.notify(queue: .main) {
             
             if let assignedPulls = assignedPulls, let createdPulls = createdPulls, let reviewRequestedPulls = reviewRequestedPulls {
-                self.statusBarItem.button?.title = ""
+                switch counterType {
+                case .assigned:        self.statusBarItem.button?.title = assignedPulls.isEmpty ? "" : String(assignedPulls.count)
+                case .created:         self.statusBarItem.button?.title = createdPulls.isEmpty ? "" : String(createdPulls.count)
+                case .reviewRequested: self.statusBarItem.button?.title = reviewRequestedPulls.isEmpty ? "" : String(reviewRequestedPulls.count)
+                case .none:            self.statusBarItem.button?.title = ""
+                }
 
                 if Defaults[.showAssigned] && !assignedPulls.isEmpty {
-                    if Defaults[.counterType] == .assigned {
-                        self.statusBarItem.button?.title = String(assignedPulls.count)
-                    }
-
                     self.menu.addItem(NSMenuItem(title: "Assigned (\(assignedPulls.count))", action: nil, keyEquivalent: ""))
                     for pull in assignedPulls {
                         self.menu.addItem(self.createMenuItem(pull: pull))
@@ -129,10 +136,6 @@ extension AppDelegate {
                 }
                 
                 if Defaults[.showCreated] && !createdPulls.isEmpty {
-                    if Defaults[.counterType] == .created {
-                        self.statusBarItem.button?.title = String(createdPulls.count)
-                    }
-
                     self.menu.addItem(NSMenuItem(title: "Created (\(createdPulls.count))", action: nil, keyEquivalent: ""))
                     for pull in createdPulls {
                         self.menu.addItem(self.createMenuItem(pull: pull))
@@ -141,10 +144,6 @@ extension AppDelegate {
                 }
 
                 if Defaults[.showRequested] && !reviewRequestedPulls.isEmpty {
-                    if Defaults[.counterType] == .reviewRequested {
-                        self.statusBarItem.button?.title = String(reviewRequestedPulls.count)
-                    }
-
                     self.menu.addItem(NSMenuItem(title: "Review Requested (\(reviewRequestedPulls.count))", action: nil, keyEquivalent: ""))
                     for pull in reviewRequestedPulls {
                         self.menu.addItem(self.createMenuItem(pull: pull))

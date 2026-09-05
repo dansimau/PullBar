@@ -18,6 +18,7 @@ public class GitHubClient {
         
         if (Defaults[.githubUsername] == "" || githubToken == "") {
             completion([Edge]())
+            return
         }
         
         let headers: HTTPHeaders = [
@@ -50,6 +51,7 @@ public class GitHubClient {
         
         if (Defaults[.githubUsername] == "" || githubToken == "") {
             completion([Edge]())
+            return
         }
         
         let headers: HTTPHeaders = [
@@ -80,6 +82,7 @@ public class GitHubClient {
     func getReviewRequestedPulls(completion:@escaping (([Edge]) -> Void)) -> Void {
         if (Defaults[.githubUsername] == "" || githubToken == "") {
             completion([Edge]())
+            return
         }
         
         let headers: HTTPHeaders = [
